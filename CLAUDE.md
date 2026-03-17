@@ -115,6 +115,22 @@ veritas_reader/
 
 ---
 
+## EditorWidget — Markup ⇄ Formatted Toggle
+
+`app/editor.py` uses a `QStackedWidget` with two panes:
+- **Index 0** — `SpellCheckEdit` (`QPlainTextEdit` subclass): raw markdown source
+- **Index 1** — `QTextEdit`: rendered rich text
+
+**Mode switching contract:**
+- `_switch_to_formatted`: saves raw markdown to `_last_markup_text`, sets `_formatted_dirty = False`, loads HTML via `markdown2` with `blockSignals(True)` to avoid spurious dirty flag
+- `_switch_to_markup`: if `_formatted_dirty` is `False` (user only viewed, didn't edit), restores `_last_markup_text` directly — **no HTML→MD conversion**; if `True`, runs `markdownify(toHtml())` and emits `text_changed`
+- `_on_rich_text_changed`: sets `_formatted_dirty = True` then emits `text_changed`
+- `set_text()`: resets `_last_markup_text` and `_formatted_dirty`; uses `blockSignals` when setting HTML in formatted mode
+
+**Why:** Qt's `toHtml()` is verbose (inline styles, `<span>` tags, paragraph margins); `markdownify` round-tripping it produces degraded markdown (extra blank lines, changed markers). The dirty flag ensures round-trip conversion only happens when the user actually edited in formatted mode.
+
+---
+
 ## Development Conventions
 
 - **Python 3.11+** required.

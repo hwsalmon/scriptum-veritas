@@ -173,6 +173,8 @@ class EditorWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._mode = "markup"  # "markup" | "formatted"
+        self._last_markup_text: str = ""  # saved before switching to formatted
+        self._formatted_dirty: bool = False  # True only if user edited in formatted mode
         self._spell = _load_spell_checker()
         self._build_ui()
 
@@ -328,7 +330,7 @@ class EditorWidget(QWidget):
         self._rich_editor.setPlaceholderText(
             "Formatted view — edit here or switch to Markup to see raw text."
         )
-        self._rich_editor.textChanged.connect(self.text_changed)
+        self._rich_editor.textChanged.connect(self._on_rich_text_changed)
         self._rich_editor.cursorPositionChanged.connect(self._update_style_combo)
         SpellCheckHighlighter(self._rich_editor.document(), self._spell)
 
@@ -366,11 +368,15 @@ class EditorWidget(QWidget):
 
     def _switch_to_formatted(self) -> None:
         md = self._markup_editor.toPlainText()
+        self._last_markup_text = md
+        self._formatted_dirty = False
         html = markdown2.markdown(
             md,
             extras=["tables", "fenced-code-blocks", "header-ids"],
         )
+        self._rich_editor.blockSignals(True)
         self._rich_editor.setHtml(html)
+        self._rich_editor.blockSignals(False)
         self._stack.setCurrentIndex(1)
         self._mode = "formatted"
         self._mode_btn.setText("Markup")
@@ -378,19 +384,30 @@ class EditorWidget(QWidget):
         self._mode_btn.setChecked(True)
 
     def _switch_to_markup(self) -> None:
-        html = self._rich_editor.toHtml()
-        md = html_to_md(
-            html,
-            heading_style="ATX",
-            bullets="-",
-            strip=["a"],
-        ).strip()
+        if self._formatted_dirty:
+            html = self._rich_editor.toHtml()
+            md = html_to_md(
+                html,
+                heading_style="ATX",
+                bullets="-",
+                strip=["a"],
+            ).strip()
+        else:
+            md = self._last_markup_text
+        self._markup_editor.blockSignals(True)
         self._markup_editor.setPlainText(md)
+        self._markup_editor.blockSignals(False)
         self._stack.setCurrentIndex(0)
         self._mode = "markup"
         self._mode_btn.setText("Formatted")
         self._mode_btn.setToolTip("Switch to formatted (rich text) view")
         self._mode_btn.setChecked(False)
+        if self._formatted_dirty:
+            self.text_changed.emit()
+
+    def _on_rich_text_changed(self) -> None:
+        self._formatted_dirty = True
+        self.text_changed.emit()
 
     # ------------------------------------------------------------------
     # Public API
@@ -398,13 +415,17 @@ class EditorWidget(QWidget):
 
     def set_text(self, text: str) -> None:
         """Replace editor content.  Always accepts markdown source."""
+        self._last_markup_text = text
+        self._formatted_dirty = False
         self._markup_editor.setPlainText(text)
         if self._mode == "formatted":
             html = markdown2.markdown(
                 text,
                 extras=["tables", "fenced-code-blocks", "header-ids"],
             )
+            self._rich_editor.blockSignals(True)
             self._rich_editor.setHtml(html)
+            self._rich_editor.blockSignals(False)
 
     def get_text(self) -> str:
         """Return current content as markdown (from whichever pane is active)."""
